@@ -1,13 +1,25 @@
-const { createClient } = require('@supabase/supabase-js');
+// api/og-preview.js
+import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   'https://nhtaqudkeotjtyeactzc.supabase.co',
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5odGFxdWRrZW90anR5ZWFjdHpjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ2OTc4NTgsImV4cCI6MjA3MDI3Mzg1OH0.a48ZPYIJtdgsa-TnZgpVXG-QDFJtYTI94hzeFn5btVg'
 );
 
-const BASE_URL = 'https://blackceldom.com';
-const LOGO_URL = 'https://blackceldom.com/bcd-logo.png';
-const THEME_COLOR = '#D97706'; // Gold/brown theme color
+const BOT_USER_AGENTS = [
+  'discordbot', 'twitterbot', 'facebookexternalhit', 'linkedinbot',
+  'slackbot', 'telegrambot', 'whatsapp', 'googlebot', 'bingbot',
+  'yandexbot', 'duckduckbot', 'baiduspider', 'sogou', 'exabot',
+  'facebot', 'ia_archiver', 'mj12bot', 'pinterest', 'redditbot',
+  'rogerbot', 'showyoubot', 'embedly', 'quora', 'outbrain',
+  'vkshare', 'w3c_validator', 'applebot', 'petalbot', 'semrushbot'
+];
+
+function isBot(userAgent) {
+  if (!userAgent) return false;
+  const ua = userAgent.toLowerCase();
+  return BOT_USER_AGENTS.some(bot => ua.includes(bot));
+}
 
 function escapeHtml(text) {
   if (!text) return '';
@@ -24,289 +36,307 @@ function stripHtml(html) {
   return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
 }
 
-function createOGHtml({ title, description, image, url, type = 'website', siteName = 'BlackCeldom' }) {
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta property="og:title" content="${escapeHtml(title)}" />
-  <meta property="og:description" content="${escapeHtml(description)}" />
-  <meta property="og:image" content="${escapeHtml(image)}" />
-  <meta property="og:url" content="${escapeHtml(url)}" />
-  <meta property="og:type" content="${type}" />
-  <meta property="og:site_name" content="${siteName}" />
-  <meta name="theme-color" content="${THEME_COLOR}" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="${escapeHtml(title)}" />
-  <meta name="twitter:description" content="${escapeHtml(description)}" />
-  <meta name="twitter:image" content="${escapeHtml(image)}" />
-  <meta name="twitter:site" content="@BlackCeldom" />
-  <link rel="icon" href="${LOGO_URL}" />
-  <title>${escapeHtml(title)}</title>
-</head>
-<body style="background:#0a0a0a;color:#FACC15;font-family:system-ui;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;text-align:center;">
-  <img src="${LOGO_URL}" alt="BlackCeldom" style="width:64px;height:64px;margin-bottom:20px;border-radius:12px;" />
-  <h1 style="margin:0 0 10px;font-size:24px;">${escapeHtml(title)}</h1>
-  <p style="margin:0;color:#a3a3a3;max-width:500px;">${escapeHtml(description)}</p>
-  <a href="${escapeHtml(url)}" style="margin-top:20px;color:${THEME_COLOR};text-decoration:none;">View on BlackCeldom →</a>
-</body>
-</html>`;
+function getYouTubeVideoId(url) {
+  if (!url) return null;
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\s?]+)/,
+    /youtube\.com\/shorts\/([^&\s?]+)/
+  ];
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
 }
 
-module.exports = async function handler(req, res) {
-  const { path } = req.query;
+function getTikTokVideoId(url) {
+  if (!url) return null;
+  const match = url.match(/tiktok\.com\/@[^/]+\/video\/(\d+)/);
+  return match ? match[1] : null;
+}
+
+function formatCount(count) {
+  if (!count || count === 0) return '0';
+  if (count >= 1000000) return (count / 1000000).toFixed(1) + 'M';
+  if (count >= 1000) return (count / 1000).toFixed(1) + 'K';
+  return count.toString();
+}
+
+function timeAgo(dateString) {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  const now = new Date();
+  const seconds = Math.floor((now - date) / 1000);
   
-  if (!path) {
-    return res.redirect(302, BASE_URL);
-  }
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+  if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+  if (seconds < 604800) return Math.floor(seconds / 86400) + 'd ago';
+  if (seconds < 2592000) return Math.floor(seconds / 604800) + 'w ago';
+  return Math.floor(seconds / 2592000) + 'mo ago';
+}
 
+function formatTags(tags) {
+  if (!tags || !Array.isArray(tags) || tags.length === 0) return '';
+  return tags.slice(0, 3).map(t => `#${t.replace(/\s+/g, '')}`).join(' ');
+}
+
+export default async function handler(req, res) {
   const userAgent = req.headers['user-agent'] || '';
-  const isBot = /Discordbot|Twitterbot|facebookexternalhit|LinkedInBot|Slackbot|TelegramBot|WhatsApp|Googlebot|bingbot|yandex|baidu|duckduckbot|Embedly|Quora|outbrain|pinterest|vkShare|W3C_Validator/i.test(userAgent);
+  const { path } = req.query;
+  const canonicalUrl = `https://blackceldom.com${path || '/'}`;
 
-  if (!isBot) {
-    return res.redirect(302, `${BASE_URL}${path}`);
+  if (!isBot(userAgent)) {
+    return res.redirect(302, canonicalUrl);
   }
+
+  let ogData = {
+    title: 'BlackCeldom - Unite. Share. Grow.',
+    description: 'The first truly safe space for Black voices. Join 50,000+ members in our community.',
+    image: 'https://blackceldom.com/bcd-logo.png',
+    url: canonicalUrl,
+    type: 'website',
+    videoUrl: null,
+    videoType: null,
+    author: null,
+    siteName: 'BlackCeldom'
+  };
 
   try {
-    // ===== POST PREVIEW =====
-    if (path.startsWith('/post/')) {
-      const postId = path.replace('/post/', '');
+    // Handle post pages
+    if (path && path.startsWith('/post/')) {
+      const postId = path.replace('/post/', '').split('?')[0];
+      
       const { data: post } = await supabase
         .from('posts')
-        .select('title, content, image_url, image_urls, user_id, primary_category')
+        .select('id, title, content, image_url, image_urls, video_url, enhancements, views_count, user_id, created_at, primary_category, tags, is_event, is_official')
         .eq('id', postId)
-        .maybeSingle();
+        .single();
 
-      if (!post) {
-        return res.redirect(302, `${BASE_URL}${path}`);
+      if (post) {
+        // Fetch author info
+        const { data: author } = await supabase
+          .from('profiles')
+          .select('username, avatar_url, is_admin, is_moderator')
+          .eq('user_id', post.user_id)
+          .single();
+
+        // Fetch like count
+        const { count: likeCount } = await supabase
+          .from('post_likes')
+          .select('*', { count: 'exact', head: true })
+          .eq('post_id', postId)
+          .eq('type', 'like');
+
+        // Fetch comment count
+        const { count: commentCount } = await supabase
+          .from('comments')
+          .select('*', { count: 'exact', head: true })
+          .eq('post_id', postId);
+
+        const title = post.title || 'Post on BlackCeldom';
+        const content = stripHtml(post.content || '').substring(0, 120);
+        const authorName = author?.username || 'Anonymous';
+        const likes = formatCount(likeCount || 0);
+        const views = formatCount(post.views_count || 0);
+        const comments = formatCount(commentCount || 0);
+        const posted = timeAgo(post.created_at);
+        const tags = formatTags(post.tags);
+        const category = post.primary_category || '';
+        const isVerified = author?.is_admin || author?.is_moderator;
+
+        // Build rich description
+        let description = content ? `"${content}..."` : '';
+        description += `\n\n`;
+        description += `👤 @${authorName}${isVerified ? ' ✓' : ''} • ⏰ ${posted}`;
+        description += `\n❤️ ${likes} • 💬 ${comments} • 👁️ ${views}`;
+        if (category) description += `\n📁 ${category}`;
+        if (tags) description += `\n${tags}`;
+
+        // Post type badges
+        let titlePrefix = '';
+        if (post.is_official) titlePrefix = '📢 ';
+        else if (post.is_event) titlePrefix = '🗓️ ';
+
+        ogData.title = `${titlePrefix}${escapeHtml(title)} | BlackCeldom`;
+        ogData.description = escapeHtml(description);
+        ogData.type = 'article';
+        ogData.author = authorName;
+
+        // Check for video content
+        let videoUrl = null;
+        let videoType = null;
+        let videoThumbnail = null;
+
+        if (post.video_url) {
+          const ytId = getYouTubeVideoId(post.video_url);
+          const ttId = getTikTokVideoId(post.video_url);
+          
+          if (ytId) {
+            videoUrl = `https://www.youtube.com/embed/${ytId}`;
+            videoType = 'text/html';
+            videoThumbnail = `https://img.youtube.com/vi/${ytId}/maxresdefault.jpg`;
+          } else if (ttId) {
+            videoThumbnail = post.image_url || post.image_urls?.[0];
+          }
+        }
+
+        // Check enhancements for embeds
+        if (!videoUrl && post.enhancements) {
+          const enhancements = typeof post.enhancements === 'string' 
+            ? JSON.parse(post.enhancements) 
+            : post.enhancements;
+          
+          const embeds = enhancements?.embeds || [];
+          for (const embed of embeds) {
+            if (embed.type === 'youtube' && embed.url) {
+              const ytId = getYouTubeVideoId(embed.url);
+              if (ytId) {
+                videoUrl = `https://www.youtube.com/embed/${ytId}`;
+                videoType = 'text/html';
+                videoThumbnail = `https://img.youtube.com/vi/${ytId}/maxresdefault.jpg`;
+                break;
+              }
+            } else if (embed.type === 'tiktok' && embed.url) {
+              videoThumbnail = embed.thumbnail || post.image_url;
+            }
+          }
+        }
+
+        if (videoUrl) {
+          ogData.videoUrl = videoUrl;
+          ogData.videoType = videoType;
+        }
+
+        if (videoThumbnail) {
+          ogData.image = videoThumbnail;
+        } else if (post.image_urls?.length > 0) {
+          ogData.image = post.image_urls[0];
+        } else if (post.image_url) {
+          ogData.image = post.image_url;
+        }
       }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('username, avatar_url')
-        .eq('user_id', post.user_id)
-        .maybeSingle();
-
-      const title = post.title || `Post by ${profile?.username || 'User'}`;
-      const description = stripHtml(post.content)?.substring(0, 200) || 'Check out this post on BlackCeldom';
-      const image = post.image_url || post.image_urls?.[0] || profile?.avatar_url || LOGO_URL;
-
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title,
-        description: description + (post.primary_category ? ` • ${post.primary_category}` : ''),
-        image,
-        url: `${BASE_URL}${path}`,
-        type: 'article'
-      }));
     }
 
-    // ===== PROFILE PREVIEW =====
-    if (path.startsWith('/profile/')) {
-      const userId = path.replace('/profile/', '');
+    // Handle profile pages
+    else if (path && path.startsWith('/profile/')) {
+      const userId = path.replace('/profile/', '').split('?')[0];
+      
       const { data: profile } = await supabase
         .from('profiles')
-        .select('username, bio, avatar_url, total_posts, total_likes_received')
+        .select('username, bio, avatar_url, is_admin, is_moderator, total_posts, total_likes_received')
         .eq('user_id', userId)
-        .maybeSingle();
+        .single();
 
-      if (!profile) {
-        return res.redirect(302, `${BASE_URL}${path}`);
+      // Get follower count
+      const { count: followerCount } = await supabase
+        .from('follows')
+        .select('*', { count: 'exact', head: true })
+        .eq('following_id', userId);
+
+      if (profile) {
+        const isVerified = profile.is_admin || profile.is_moderator;
+        const badge = profile.is_admin ? '👑 Admin' : profile.is_moderator ? '🛡️ Mod' : '';
+        
+        let description = profile.bio ? `"${escapeHtml(profile.bio.substring(0, 100))}"` : '';
+        description += `\n\n👥 ${formatCount(followerCount || 0)} followers`;
+        description += ` • 📝 ${formatCount(profile.total_posts || 0)} posts`;
+        description += ` • ❤️ ${formatCount(profile.total_likes_received || 0)} likes`;
+        if (badge) description += `\n${badge}`;
+
+        ogData.title = `@${escapeHtml(profile.username)}${isVerified ? ' ✓' : ''} | BlackCeldom`;
+        ogData.description = description;
+        if (profile.avatar_url) ogData.image = profile.avatar_url;
+        ogData.type = 'profile';
       }
-
-      const title = `${profile.username} on BlackCeldom`;
-      const description = profile.bio?.substring(0, 200) || `${profile.username} • ${profile.total_posts || 0} posts • ${profile.total_likes_received || 0} likes`;
-      const image = profile.avatar_url || LOGO_URL;
-
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title,
-        description,
-        image,
-        url: `${BASE_URL}${path}`,
-        type: 'profile'
-      }));
     }
 
-    // ===== CATEGORY PREVIEW =====
-    if (path.startsWith('/category/')) {
-      const categorySlug = path.replace('/category/', '');
+    // Handle category pages
+    else if (path && path.startsWith('/category/')) {
+      const categorySlug = path.replace('/category/', '').split('?')[0];
+      
       const { data: category } = await supabase
         .from('categories')
-        .select('name, description, profile_picture_url, post_count, follower_count')
+        .select('name, description, icon, post_count, follower_count')
         .eq('slug', categorySlug)
-        .maybeSingle();
+        .single();
 
-      if (!category) {
-        return res.redirect(302, `${BASE_URL}${path}`);
+      if (category) {
+        ogData.title = `${category.icon || '📁'} ${category.name} | BlackCeldom`;
+        ogData.description = `${category.description || 'Explore posts in ' + category.name}\n\n📝 ${formatCount(category.post_count || 0)} posts • 👥 ${formatCount(category.follower_count || 0)} followers`;
       }
-
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: `${category.name} - BlackCeldom`,
-        description: category.description || `${category.post_count || 0} posts • ${category.follower_count || 0} followers`,
-        image: category.profile_picture_url || LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
     }
 
-    // ===== WIKI PREVIEW =====
-    if (path.startsWith('/wiki')) {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'The Book of Unity - BlackCeldom Wiki',
-        description: 'Explore the comprehensive knowledge base and history of the BlackCeldom community.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
+    // Handle wiki pages
+    else if (path && path.startsWith('/wiki')) {
+      ogData.title = '📚 Wiki | BlackCeldom';
+      ogData.description = 'Explore the BlackCeldom Wiki - Your guide to the community, culture, and everything BlackCeldom.';
     }
 
-    // ===== CHAT PREVIEW =====
-    if (path.startsWith('/chat')) {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'Chat Hub - BlackCeldom',
-        description: 'Join real-time conversations with the BlackCeldom community.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
+    // Handle subscription page
+    else if (path && path.startsWith('/subscription')) {
+      ogData.title = '👑 Premium Membership | BlackCeldom';
+      ogData.description = 'Unlock exclusive features with BlackCeldom Premium!\n\n✨ Custom badges & colors\n🎨 Advanced post styling\n📊 Analytics dashboard\n🔒 Premium-only features';
     }
 
-    // ===== PROMO PREVIEW =====
-    if (path === '/promo' || path === '/promo-tiktok') {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'Join BlackCeldom - The First Safe Space for Black Voices',
-        description: 'Unite. Share. Grow. Join 50,000+ members in the first truly safe space for Black voices. Zero tolerance for racism.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
+    // Handle chat page
+    else if (path && path.startsWith('/chat')) {
+      ogData.title = '💬 Chat | BlackCeldom';
+      ogData.description = 'Join real-time conversations with the BlackCeldom community. Connect, discuss, and build relationships.';
     }
-
-    // ===== SUBSCRIPTION PREVIEW =====
-    if (path === '/subscription') {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'Premium Membership - BlackCeldom',
-        description: 'Unlock exclusive features: custom badges, priority support, advanced posting tools, and more.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
-    }
-
-    // ===== LOGIN PREVIEW =====
-    if (path === '/login') {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'Login - BlackCeldom',
-        description: 'Sign in to your BlackCeldom account and connect with the community.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
-    }
-
-    // ===== SIGNUP PREVIEW =====
-    if (path === '/signup') {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'Join BlackCeldom',
-        description: 'Create your account and join the first truly safe space for Black voices. Unite. Share. Grow.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
-    }
-
-    // ===== GUIDELINES PREVIEW =====
-    if (path === '/guidelines') {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'Community Guidelines - BlackCeldom',
-        description: 'The BlackCeldom Code of Respect and Discourse. Where Darkness Makes Us Equal, Conversation Makes Us Whole.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
-    }
-
-    // ===== FAQ PREVIEW =====
-    if (path === '/faq') {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'FAQ - BlackCeldom',
-        description: 'Frequently asked questions about BlackCeldom. Learn how to use the platform and get the most out of your experience.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
-    }
-
-    // ===== TERMS PREVIEW =====
-    if (path === '/terms') {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'Terms of Service - BlackCeldom',
-        description: 'Read our terms of service and understand your rights and responsibilities on BlackCeldom.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
-    }
-
-    // ===== PRIVACY PREVIEW =====
-    if (path === '/privacy') {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'Privacy Policy - BlackCeldom',
-        description: 'Learn how we protect your data and privacy on BlackCeldom.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
-    }
-
-    // ===== FOLLOWING PREVIEW =====
-    if (path === '/following') {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'Following Feed - BlackCeldom',
-        description: 'See posts from people and categories you follow.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
-    }
-
-    // ===== MESSAGES PREVIEW =====
-    if (path.startsWith('/messages')) {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'Direct Messages - BlackCeldom',
-        description: 'Private conversations with your BlackCeldom connections.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
-    }
-
-    // ===== NOTIFICATIONS PREVIEW =====
-    if (path === '/notifications') {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'Notifications - BlackCeldom',
-        description: 'Stay updated with your latest notifications on BlackCeldom.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
-    }
-
-    // ===== BOOKMARKS PREVIEW =====
-    if (path === '/bookmarks') {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'Bookmarks - BlackCeldom',
-        description: 'Your saved posts and content on BlackCeldom.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
-    }
-
-    // ===== SEARCH PREVIEW =====
-    if (path.startsWith('/search')) {
-      return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-        title: 'Search - BlackCeldom',
-        description: 'Search for posts, users, and categories on BlackCeldom.',
-        image: LOGO_URL,
-        url: `${BASE_URL}${path}`
-      }));
-    }
-
-    // ===== DEFAULT / HOME PREVIEW =====
-    return res.setHeader('Content-Type', 'text/html').send(createOGHtml({
-      title: 'BlackCeldom - Unite. Share. Grow.',
-      description: 'The first truly safe space for Black voices. Join our community of 50,000+ members. Zero tolerance for racism.',
-      image: LOGO_URL,
-      url: `${BASE_URL}${path}`
-    }));
 
   } catch (error) {
-    console.error('OG Preview Error:', error);
-    return res.redirect(302, `${BASE_URL}${path}`);
+    console.error('OG Preview error:', error);
   }
-};
+
+  // Generate HTML with OG meta tags
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>${ogData.title}</title>
+  
+  <!-- Open Graph -->
+  <meta property="og:site_name" content="${ogData.siteName}">
+  <meta property="og:title" content="${ogData.title}">
+  <meta property="og:description" content="${ogData.description}">
+  <meta property="og:image" content="${ogData.image}">
+  <meta property="og:url" content="${ogData.url}">
+  <meta property="og:type" content="${ogData.type}">
+  ${ogData.videoUrl ? `
+  <meta property="og:video" content="${ogData.videoUrl}">
+  <meta property="og:video:secure_url" content="${ogData.videoUrl}">
+  <meta property="og:video:type" content="${ogData.videoType}">
+  <meta property="og:video:width" content="1280">
+  <meta property="og:video:height" content="720">
+  ` : ''}
+  ${ogData.author ? `<meta property="article:author" content="${ogData.author}">` : ''}
+  
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="${ogData.videoUrl ? 'player' : 'summary_large_image'}">
+  <meta name="twitter:site" content="@blackceldom">
+  <meta name="twitter:title" content="${ogData.title}">
+  <meta name="twitter:description" content="${ogData.description}">
+  <meta name="twitter:image" content="${ogData.image}">
+  ${ogData.videoUrl ? `
+  <meta name="twitter:player" content="${ogData.videoUrl}">
+  <meta name="twitter:player:width" content="1280">
+  <meta name="twitter:player:height" content="720">
+  ` : ''}
+  
+  <!-- Additional Meta -->
+  <meta name="theme-color" content="#FACC15">
+  <link rel="icon" href="https://blackceldom.com/bcd-logo.png">
+</head>
+<body>
+  <h1>${ogData.title}</h1>
+  <p>${ogData.description}</p>
+  <p>🔗 <a href="${ogData.url}">View on BlackCeldom</a></p>
+  <footer>© BlackCeldom - Unite. Share. Grow.</footer>
+</body>
+</html>`;
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  return res.status(200).send(html);
+}
